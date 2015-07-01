@@ -84,20 +84,50 @@ class BaseAddressSpace(object):
     # False) then reads from the same offset MUST always return the same bytes.
     volatile = False
 
+    # This flag signifies whether calls to .write will do anything.
+    # Even if an address space supports writing, this flag needs to be flipped
+    # in order for calls to .write to be honored.
+    _writable = None
+
+    @property
+    def writable(self):
+        return self._writable and (self.base is None or self.base.writable)
+
+    @writable.setter
+    def writable(self, value):
+        if self._writable == value:
+            return
+
+        if value:
+            if not self.session:
+                raise ValueError(
+                    "Cannot enable write support without a session.")
+
+            if not self.session.GetParameter("writable_address_space"):
+                raise ValueError(
+                    "You're trying to set %r to be writable, but the session "
+                    "says 'no'. Set 'writable_address_space' to True if you "
+                    "really want to do this thing." % self)
+
+        self._writable = value
+        if self.base:
+            self.base.writable = value
+
     def __init__(self, base=None, session=None, write=False, profile=None,
                  **_):
         """Base is the AS we will be stacking on top of, opts are options which
         we may use.
 
         Args:
-          base: A base address space to stack on top of (i.e. delegate to it for
+        base: A base address space to stack on top of (i.e. delegate to it for
             satisfying read requests).
 
-          session: An optional session object.
+        session: An optional session object.
 
-          write: Should writing be allowed? Not currently implemented.
+        write: Should writing be allowed? This will have no effect if the
+            address space doesn't support it.
 
-          profile: An optional profile to use for parsing the address space
+        profile: An optional profile to use for parsing the address space
             (e.g. needed for hibernation, crash etc.)
         """
         if session is None and base is not None:
@@ -118,7 +148,7 @@ class BaseAddressSpace(object):
         if session is None:
             raise RuntimeError("Session must be provided.")
 
-        self.writeable = (
+        self.writable = (
             self.session and self.session.writable_address_space or write)
 
         # This is a short lived cache. If we use a static image, this cache need
@@ -231,16 +261,27 @@ class BaseAddressSpace(object):
             yield (contiguous_voffset, contiguous_poffset, total_length)
 
     def is_valid_address(self, _addr):
-        """ Tell us if the address is valid """
+        """Tell us if the address is valid """
         return True
 
     def write(self, addr, buf):
-        try:
+        """Write to the address space, if writable.
+
+        Do not override this method - override do_write instead.
+
+        Returns: Number of bytes written.
+        """
+        if not self.writable:
+            return 0
+
+        return self.do_write(addr, buf)
+
+    def do_write(self, addr, buf):
+        """Actually write to the address space, if supported."""
+        if self.base:
             return self.base.write(self.vtop(addr), buf)
-        except AttributeError:
-            raise NotImplementedError(
-                "Write support for this type of Address Space"
-                " has not been implemented")
+
+        return 0
 
     def vtop(self, addr):
         """Return the physical address of this virtual address."""
@@ -273,6 +314,9 @@ class BaseAddressSpace(object):
 class BufferAddressSpace(BaseAddressSpace):
     __abstract = True
 
+    # It's helpful for this to be writable by default.
+    writable = True
+
     def __init__(self, base_offset=0, data='', metadata=None, **kwargs):
         super(BufferAddressSpace, self).__init__(**kwargs)
         self.fname = "Buffer"
@@ -296,9 +340,9 @@ class BufferAddressSpace(BaseAddressSpace):
         data = self.data[offset: offset + length]
         return data + "\x00" * (length - len(data))
 
-    def write(self, addr, data):
+    def do_write(self, addr, data):
         self.data = self.data[:addr] + data + self.data[addr + len(data):]
-        return True
+        return len(data)
 
     def get_available_addresses(self, start=None):
         yield (self.base_offset, self.base_offset, len(self.data))
@@ -380,8 +424,7 @@ class PagedReader(BaseAddressSpace):
     __abstract = True
 
     def _read_chunk(self, vaddr, length):
-        """
-        Read bytes from a virtual address.
+        """Read bytes from a virtual address.
 
         Args:
           vaddr: A virtual address to read from.
@@ -397,10 +440,31 @@ class PagedReader(BaseAddressSpace):
 
         return self.base.read(paddr, to_read)
 
+    def _write_chunk(self, vaddr, buf):
+        to_write = min(len(buf), self.PAGE_SIZE - (vaddr % self.PAGE_SIZE))
+        if not to_write:
+            return 0
+
+        paddr = self.vtop(vaddr)
+        if paddr:
+            self.base.write(paddr, buf[:to_write])
+
+        return to_write
+
+    def do_write(self, addr, buf):
+        available = len(buf)
+        written = 0
+
+        while available > written:
+            chunk_len = self._write_chunk(addr + written, buf[written:])
+            if not chunk_len:
+                break
+            written += chunk_len
+
+        return written
+
     def read(self, addr, length):
-        """
-        Read 'length' bytes from the virtual address 'vaddr'.
-        """
+        """Read 'length' bytes from the virtual address 'vaddr'."""
         if length > self.session.GetParameter("buffer_size"):
             raise IOError("Too much data to read.")
 
@@ -448,8 +512,20 @@ class RunBasedAddressSpace(PagedReader):
         if file_offset is None:
             return "\x00" * min(length, available_length)
 
-        else:
-            return self.base.read(file_offset, min(length, available_length))
+        return self.base.read(file_offset, min(length, available_length))
+
+    def _write_chunk(self, addr, buf):
+        buflen = len(buf)
+        file_offset, available_length = self._get_available_buffer(
+            addr, buflen)
+
+        length = min(buflen, available_length)
+
+        # Silently skip unavailable runs.
+        if file_offset is None or length == 0:
+            return length
+
+        return self.base.write(file_offset, buf[:length])
 
     def vtop(self, addr):
         file_offset, _ = self._get_available_buffer(addr, 1)

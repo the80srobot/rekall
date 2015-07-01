@@ -34,6 +34,7 @@ from rekall import constants
 from rekall import registry
 from rekall import plugin
 from rekall import obj
+from rekall import scan
 from rekall import testlib
 from rekall import utils
 
@@ -215,8 +216,7 @@ class Info(plugin.Command):
         renderer.section()
         renderer.table_header([('Command', 'function', "20"),
                                ('Provider Class', 'provider', '20'),
-                               ('Docs', 'docs', '50'),
-                              ])
+                               ('Docs', 'docs', '50')])
 
         for cls, name, doc in sorted(self.plugins(), key=lambda x: x[1]):
             renderer.table_row(name, cls, doc)
@@ -284,7 +284,6 @@ class FindDTB(plugin.PhysicalASMixin, plugin.ProfileCommand):
         else:
             impl = 'IA32PagedMemory'
 
-
         as_class = addrspace.BaseAddressSpace.classes[impl]
         return as_class
 
@@ -316,6 +315,7 @@ class LoadAddressSpace(plugin.Command):
     # Parse Address spaces from this specification. TODO: Support EPT
     # specification and nesting.
     ADDRESS_SPACE_RE = re.compile("([a-zA-Z0-9]+)@((0x)?[0-9a-zA-Z]+)")
+
     def ResolveAddressSpace(self, name=None):
         """Resolve the name into an address space.
 
@@ -376,11 +376,11 @@ class LoadAddressSpace(plugin.Command):
                 self.session.physical_address_space = self.AddressSpaceFactory(
                     specification=self.pas_spec)
 
-
             return self.session.physical_address_space
 
         except addrspace.ASAssertionError as e:
-            self.session.logging.error("Could not create address space: %s" % e)
+            self.session.logging.error(
+                "Could not create address space: %s" % e)
 
         return self.session.physical_address_space
 
@@ -487,8 +487,8 @@ class LoadAddressSpace(plugin.Command):
 
                     raise
 
-            ## A full iteration through all the classes without anyone
-            ## selecting us means we are done:
+            # A full iteration through all the classes without anyone
+            # selecting us means we are done:
             if not found:
                 break
 
@@ -606,7 +606,8 @@ class DirectoryDumperMixin(object):
                 break
 
             out_offset = offset - start
-            self.session.report_progress("Dumping %s Mb", out_offset/BUFFSIZE)
+            self.session.report_progress(
+                "Dumping %s Mb", out_offset / BUFFSIZE)
             outfd.seek(out_offset)
             i = offset
 
@@ -747,7 +748,7 @@ class DT(plugin.ProfileCommand):
         for offset, k, v in sorted(fields):
             renderer.table_row(offset, k, v, depth=depth)
             if isinstance(v, obj.Struct):
-                self._render_Struct(renderer, v, depth=depth+1)
+                self._render_Struct(renderer, v, depth=depth + 1)
 
     def render(self, renderer):
         item = self.target
@@ -802,7 +803,7 @@ class AddressMap(object):
                 if relative:
                     i -= start
 
-                result.append([i, i+1, fg, bg])
+                result.append([i, i + 1, fg, bg])
 
         return result
 
@@ -851,7 +852,6 @@ class Dump(plugin.Command):
         parser.add_argument("--suppress_headers", default=False, type="Boolean",
                             help="Should headers be suppressed?.")
 
-
     def __init__(self, offset=0, address_space=None, data=None, length=None,
                  width=None, rows=None, suppress_headers=False,
                  address_map=None, **kwargs):
@@ -860,21 +860,21 @@ class Dump(plugin.Command):
         You can use this plugin repeateadely to keep dumping more data using the
         "p _" (print last result) operation:
 
-        In [2]: dump 0x814b13b0, address_space="K"
-        ------> dump(0x814b13b0, address_space="K")
-        Offset                         Hex                              Data
-        ---------- ------------------------------------------------ ----------------
-        0x814b13b0 03 00 1b 00 00 00 00 00 b8 13 4b 81 b8 13 4b 81  ..........K...K.
+    In [2]: dump 0x814b13b0, address_space="K"
+    ------> dump(0x814b13b0, address_space="K")
+    Offset                         Hex                              Data
+    ---------- ------------------------------------------------ ----------------
+    0x814b13b0 03 00 1b 00 00 00 00 00 b8 13 4b 81 b8 13 4b 81  ..........K...K.
 
-        Out[3]: <rekall.plugins.core.Dump at 0x2967510>
+    Out[3]: <rekall.plugins.core.Dump at 0x2967510>
 
-        In [4]: p _
-        ------> p(_)
-        Offset                         Hex                              Data
-        ---------- ------------------------------------------------ ----------------
-        0x814b1440 70 39 00 00 54 1b 01 00 18 0a 00 00 32 59 00 00  p9..T.......2Y..
-        0x814b1450 6c 3c 01 00 81 0a 00 00 18 0a 00 00 00 b0 0f 06  l<..............
-        0x814b1460 00 10 3f 05 64 77 ed 81 d4 80 21 82 00 00 00 00  ..?.dw....!.....
+    In [4]: p _
+    ------> p(_)
+    Offset                         Hex                              Data
+    ---------- ------------------------------------------------ ----------------
+    0x814b1440 70 39 00 00 54 1b 01 00 18 0a 00 00 32 59 00 00  p9..T.......2Y..
+    0x814b1450 6c 3c 01 00 81 0a 00 00 18 0a 00 00 00 b0 0f 06  l<..............
+    0x814b1460 00 10 3f 05 64 77 ed 81 d4 80 21 82 00 00 00 00  ..?.dw....!.....
 
         Args:
           offset: The offset to start dumping from.
@@ -991,7 +991,7 @@ class Grep(plugin.Command):
         parser.add_argument("keyword",
                             help="The binary string to find.")
 
-        parser.add_argument("--limit", default=1024*1024,
+        parser.add_argument("--limit", default=1024 * 1024,
                             help="The length of data to search.")
 
     def __init__(self, offset=0, keyword=None, context=20, address_space=None,
@@ -1026,8 +1026,7 @@ class Grep(plugin.Command):
         renderer.table_header([("Offset", "offset", "[addr]"),
                                ("Hex", "hex", str(3 * self.context)),
                                ("Data", "data", str(self.context)),
-                               ("Comment", "comment", "40")]
-                             )
+                               ("Comment", "comment", "40")])
 
         resolver = self.session.address_resolver
         offset = self.offset
@@ -1035,7 +1034,7 @@ class Grep(plugin.Command):
             data = self.address_space.read(offset, 4096)
             for idx in self._GenerateHits(data):
                 for dump_offset, hexdata, translated_data in utils.Hexdump(
-                        data[idx-20:idx+20], width=self.context):
+                        data[idx - 20:idx + 20], width=self.context):
                     comment = resolver.format_address(offset + idx,
                                                       max_distance=1e6)
 
@@ -1048,6 +1047,50 @@ class Grep(plugin.Command):
 
         self.offset = offset
 
+
+class HammerMemory(plugin.Command):
+    """It's hammer time.
+
+    When you have this, everything looks like a nail.
+    """
+
+    __name = "hammer"
+
+    @classmethod
+    def args(cls, parser):
+        super(HammerMemory, cls).args(parser)
+        parser.add_argument(
+            "--initial", default=None, type="str")
+        parser.add_argument(
+            "--replacement", default=None, type="str")
+        parser.add_argument(
+            "--process", default=None, type="str")
+
+    def __init__(self, initial=None, replacement=None, process=None, **kwargs):
+        """Search an address space for keywords.
+
+        Args:
+          address_space: Name of the address_space to search.
+          offset: Start searching from this offset.
+          keyword: The binary string to find.
+          limit: The length of data to search.
+        """
+        super(HammerMemory, self).__init__(**kwargs)
+        self.initial = initial
+        self.replacement = replacement
+        self.process = process
+
+    def render(self, renderer):
+        process = self.session.entities.find_first(self.process)
+        vm = process["Struct/base"].get_process_address_space()
+        vm.writable = True
+
+        scanner = scan.MultiStringScanner(
+            needles=(self.initial,), address_space=vm, session=self.session)
+
+        for hit, _ in scanner.scan():
+            written = vm.write(hit, self.replacement)
+            print "Overwrote %d bytes at 0x%lx" % (written, hit)
 
 
 class MemmapMixIn(object):

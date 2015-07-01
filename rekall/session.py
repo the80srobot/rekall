@@ -57,7 +57,7 @@ config.DeclareOption("-f", "--filename",
                      help="The raw image to load.")
 
 config.DeclareOption(
-    "--buffer_size", default=20*1024*1024,
+    "--buffer_size", default=20 * 1024 * 1024,
     type="IntParser",
     help="The maximum size of buffers we are allowed to read. "
     "This is used to control Rekall memory usage.")
@@ -376,7 +376,6 @@ class ProgressDispatcher(object):
             handler(message, *args, **kwargs)
 
 
-
 class HoardingLogHandler(logging.Handler):
     """A logging LogHandler that stores messages as long as a renderer hasn't
     been assigned to it. Used to keep all messages that happen in Rekall before
@@ -541,7 +540,8 @@ class Session(object):
         and OSX have a different one.
         """
         # Get the current process context.
-        current_context = repr(self.GetParameter("process_context") or "Kernel")
+        current_context = repr(
+            self.GetParameter("process_context") or "Kernel")
 
         # Get the resolver from the cache.
         address_resolver = self.context_cache.get(current_context)
@@ -613,7 +613,6 @@ class Session(object):
         self.state.Set(item, value)
 
     def _RunParameterHook(self, name):
-
         """Launches the registered parameter hook for name."""
         for cls in kb.ParameterHook.classes.values():
             if cls.name == name and cls.is_active(self):
@@ -1010,7 +1009,7 @@ class InteractiveSession(Session):
 
             # Pass additional environment.
             **(env or {})
-            )
+        )
 
         with self.state:
             self.state.Set("session_list", self.session_list)

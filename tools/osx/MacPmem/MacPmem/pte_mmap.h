@@ -42,7 +42,7 @@ extern "C" {
 
     // Map the rogue page to this physical address.
     kern_return_t pmem_pte_map_rogue(addr64_t paddr);
-    kern_return_t pmem_read_rogue(struct uio *uio);
+    kern_return_t pmem_readwrite_rogue(struct uio *uio);
 
 #ifdef __cplusplus
 }

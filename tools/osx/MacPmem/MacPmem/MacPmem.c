@@ -36,6 +36,17 @@
 #include <miscfs/devfs/devfs.h>
 #include <libkern/OSAtomic.h>
 
+#ifndef PMEM_WRITE_ENABLED
+
+// Flipping this to 1 or passing PMEM_WRITE_ENABLED 1 to the compiler will
+// cause writes to /dev/pmem to actually go through to the rw handler and
+// change live memory. This is almost universally a bad idea and should only
+// ever be used for research purposes. Even ignoring cache semantics issues,
+// writing to a physical page directly bypasses any locking and will likely
+// crash your system horribly.
+#define PMEM_WRITE_ENABLED 1
+
+#endif
 
 // Used to keep track of the number of active users. We can use this
 // information to decide when to turn on autounload on idle.
@@ -59,6 +70,8 @@ static kern_return_t pmem_open(dev_t dev, __unused int flags,
                                __unused proc_t proc);
 static kern_return_t pmem_read(dev_t dev, struct uio *uio,
                                     __unused int rw);
+static kern_return_t pmem_write(dev_t dev, struct uio *uio,
+                                __unused int rw);
 static kern_return_t pmem_close(dev_t dev, __unused int flags,
                                 __unused int devtype,
                                 __unused proc_t proc);
@@ -70,7 +83,7 @@ static struct cdevsw pmem_cdevsw = {
     pmem_open,                            /* open */
     pmem_close,                           /* close */
     pmem_read,                            /* read */
-    eno_rdwrt,                            /* write */
+    pmem_write,                           /* write */
     eno_ioctl,                            /* ioctl */
     eno_stop,                             /* stop */
     eno_reset,                            /* reset */
@@ -149,19 +162,37 @@ static kern_return_t pmem_close(dev_t dev, __unused int flags,
 }
 
 
-
 static kern_return_t pmem_read(dev_t dev, struct uio *uio,
                                __unused int rw) {
     switch (minor(dev)) {
     case PMEM_DEV_MINOR:
-        return pmem_read_rogue(uio);
+        return pmem_readwrite_rogue(uio);
     case PMEM_INFO_MINOR:
         // Reading from the info device is conceptually the same as calling
         // the sysctl to get the struct.
         return pmem_readmeta(uio);
     default:
-        pmem_warn("Unknown minor device number %d.", minor(dev));
-        return KERN_FAILURE;
+            pmem_error("Unknown minor device in pmem_read: %d.", minor(dev));
+            return KERN_FAILURE;
+    }
+}
+
+
+static kern_return_t pmem_write(dev_t dev, struct uio *uio,
+                                __unused int rw) {
+    switch (minor(dev)) {
+        case PMEM_DEV_MINOR:
+#if PMEM_WRITE_ENABLED
+            return pmem_readwrite_rogue(uio);
+#else
+            return KERN_FAILURE;
+#endif
+        case PMEM_INFO_MINOR:
+            // Writing the info device isn't supported.
+            return KERN_FAILURE;
+        default:
+            pmem_error("Unknown minor device in pmem_write: %d.", minor(dev));
+            return KERN_FAILURE;
     }
 }
 

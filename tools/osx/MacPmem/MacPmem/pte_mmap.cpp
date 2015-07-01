@@ -424,15 +424,15 @@ kern_return_t pmem_pte_destroy_mapping(pmem_pte_mapping *mapping) {
 }
 
 
-// Read handler for /dev/pmem. Does what you'd expect.
+// Read/write handler for /dev/pmem. Does what you'd expect.
 //
-// It's alright to call this for reads that cross page boundaries.
+// It's alright to call this for reads or writes that cross page boundaries.
 //
 // NOTE: This function does absolutely no verification that the physical
 // offset being read from is actually backed by conventional, or, indeed, any
 // memory at all. It is the responsibility of the caller to ensure the offset
 // is valid.
-kern_return_t pmem_read_rogue(struct uio *uio) {
+kern_return_t pmem_readwrite_rogue(struct uio *uio) {
     kern_return_t error = KERN_SUCCESS;
 
     if (uio_offset(uio) < 0) {

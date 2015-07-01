@@ -20,7 +20,6 @@
 """Address spaces specific to pmem live here."""
 __author__ = "Adam Sindelar <adamsh@google.com>"
 
-import intervaltree
 from os import path
 
 from rekall import addrspace
@@ -35,6 +34,27 @@ class MacPmemAddressSpace(addrspace.RunBasedAddressSpace):
     order = standard.FileAddressSpace.order - 2
     __image = True
     volatile = True
+    fd = None
+    fname = None
+
+    @property
+    def writable(self):
+        return self._writable
+
+    @writable.setter
+    def writable(self, value):
+        if value == self._writable:
+            return
+
+        self._writable = value
+
+        if self.fd:
+            self.fd.close()
+            self.fd = open(self.fname, self.mode)
+
+    @property
+    def mode(self):
+        return "r+" if self.writable else "r"
 
     def __init__(self, base=None, filename=None, **kwargs):
         super(MacPmemAddressSpace, self).__init__(**kwargs)
@@ -47,7 +67,7 @@ class MacPmemAddressSpace(addrspace.RunBasedAddressSpace):
             "filename"))
 
         self.as_assert(self.fname, "Filename must be specified.")
-        self.fd = open(self.fname, "r")
+        self.fd = open(self.fname, self.mode)
 
         self.fname_info = "%s_info" % self.fname
         self.as_assert(path.exists(self.fname_info),
@@ -87,6 +107,19 @@ class MacPmemAddressSpace(addrspace.RunBasedAddressSpace):
         self.fd.seek(offset)
         return self.fd.read(min(length, available_length))
 
+    def _write_chunk(self, addr, buf):
+        print "writing %r to 0x%lx" % (buf, addr)
+        buflen = len(buf)
+        offset, available_length = self._get_available_buffer(addr, buflen)
+        length = min(buflen, available_length)
+
+        if offset is None or length == 0:
+            return length
+
+        self.fd.seek(offset)
+        self.fd.write(buf[:length])
+        return length
+
     def close(self):
         self.fd.close()
 
@@ -111,6 +144,7 @@ EFI_SEGMENTS_SAFETY = {
     "EfiPalCode": "r",  # OS-dependent. Largely read-only.
     "EfiMaxMemoryType": "rw",  # No idea (adamsh). Looks like general use?
 }
+
 
 def efi_type_readable(efi_type):
     return "r" in EFI_SEGMENTS_SAFETY[str(efi_type)]

@@ -32,7 +32,7 @@ from rekall.plugins.overlays.windows import crashdump
 
 
 class WritableCrashDump(crash.WindowsCrashDumpSpace64,
-                        standard.WriteableAddressSpace):
+                        standard.WritableAddressSpace):
     """A writable crash dump address space.
 
     When creating a new crash dump, we need to moodify the image:
@@ -101,7 +101,7 @@ class Raw2Dump(common.WindowsCommandPlugin):
         super(Raw2Dump, self).__init__(**kwargs)
         self.profile = crashdump.CrashDump64Profile.Initialize(self.profile)
 
-        self.buffer_size = 10*1024*1024
+        self.buffer_size = 10 * 1024 * 1024
         self.rebuild = rebuild
         self.destination = destination
         if not destination:
@@ -219,7 +219,8 @@ class Raw2Dump(common.WindowsCommandPlugin):
         self._SetKDBG(kdbg, "ExpSystemResourcesList")
         self._SetKDBG(kdbg, "KdPrintBufferSize")
         self._SetKDBG(kdbg, "KdPrintCircularBuffer")
-        self._SetKDBG(kdbg, "KdPrintCircularBufferEnd", "nt!KdpBreakpointTable")
+        self._SetKDBG(
+            kdbg, "KdPrintCircularBufferEnd", "nt!KdpBreakpointTable")
         self._SetKDBG(kdbg, "KdPrintRolloverCount")
         self._SetKDBG(kdbg, "KdPrintWritePointer")
         self._SetKDBG(kdbg, "KeLoaderBlock", "nt!KdpLoaderDebuggerBlock")
@@ -267,8 +268,8 @@ class Raw2Dump(common.WindowsCommandPlugin):
     def render(self, renderer):
         PAGE_SIZE = 0x1000
 
-        # We write the image to the destination using the WriteableAddressSpace.
-        out_as = standard.WriteableAddressSpace(
+        # We write the image to the destination using the WritableAddressSpace.
+        out_as = standard.WritableAddressSpace(
             filename=self.destination, session=self.session,
             mode="w+b")
 
@@ -351,7 +352,8 @@ class Raw2Dump(common.WindowsCommandPlugin):
         header.BugCheckCodeParameter[3] = 0x00000000
 
         # Set the sample run information
-        header.RequiredDumpSpace = number_of_pages + header.obj_size / PAGE_SIZE
+        header.RequiredDumpSpace = number_of_pages + \
+            header.obj_size / PAGE_SIZE
         header.DumpType = 1
 
         # Zero out the remaining non-essential fields from ContextRecordOffset
@@ -389,7 +391,7 @@ class Raw2Dump(common.WindowsCommandPlugin):
                 offset += len(data)
                 data_length -= len(data)
                 renderer.RenderProgress(
-                    "Wrote %sMB.", (start_offset + offset)/1024/1024)
+                    "Wrote %sMB.", (start_offset + offset) / 1024 / 1024)
 
         # Rebuild the KDBG data block if needed. According to the
         # disassembly of nt!KdCopyDataBlock the data block is
