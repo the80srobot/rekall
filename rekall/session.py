@@ -540,8 +540,7 @@ class Session(object):
         and OSX have a different one.
         """
         # Get the current process context.
-        current_context = repr(
-            self.GetParameter("process_context") or "Kernel")
+        current_context = repr(self.GetParameter("process_context") or "Kernel")
 
         # Get the resolver from the cache.
         address_resolver = self.context_cache.get(current_context)

@@ -379,8 +379,7 @@ class LoadAddressSpace(plugin.Command):
             return self.session.physical_address_space
 
         except addrspace.ASAssertionError as e:
-            self.session.logging.error(
-                "Could not create address space: %s" % e)
+            self.session.logging.error("Could not create address space: %s" % e)
 
         return self.session.physical_address_space
 
@@ -606,8 +605,7 @@ class DirectoryDumperMixin(object):
                 break
 
             out_offset = offset - start
-            self.session.report_progress(
-                "Dumping %s Mb", out_offset / BUFFSIZE)
+            self.session.report_progress("Dumping %s Mb", out_offset / BUFFSIZE)
             outfd.seek(out_offset)
             i = offset
 
@@ -1067,14 +1065,6 @@ class HammerMemory(plugin.Command):
             "--process", default=None, type="str")
 
     def __init__(self, initial=None, replacement=None, process=None, **kwargs):
-        """Search an address space for keywords.
-
-        Args:
-          address_space: Name of the address_space to search.
-          offset: Start searching from this offset.
-          keyword: The binary string to find.
-          limit: The length of data to search.
-        """
         super(HammerMemory, self).__init__(**kwargs)
         self.initial = initial
         self.replacement = replacement

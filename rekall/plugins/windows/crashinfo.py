@@ -219,8 +219,7 @@ class Raw2Dump(common.WindowsCommandPlugin):
         self._SetKDBG(kdbg, "ExpSystemResourcesList")
         self._SetKDBG(kdbg, "KdPrintBufferSize")
         self._SetKDBG(kdbg, "KdPrintCircularBuffer")
-        self._SetKDBG(
-            kdbg, "KdPrintCircularBufferEnd", "nt!KdpBreakpointTable")
+        self._SetKDBG(kdbg, "KdPrintCircularBufferEnd", "nt!KdpBreakpointTable")
         self._SetKDBG(kdbg, "KdPrintRolloverCount")
         self._SetKDBG(kdbg, "KdPrintWritePointer")
         self._SetKDBG(kdbg, "KeLoaderBlock", "nt!KdpLoaderDebuggerBlock")
@@ -352,8 +351,7 @@ class Raw2Dump(common.WindowsCommandPlugin):
         header.BugCheckCodeParameter[3] = 0x00000000
 
         # Set the sample run information
-        header.RequiredDumpSpace = number_of_pages + \
-            header.obj_size / PAGE_SIZE
+        header.RequiredDumpSpace = number_of_pages + header.obj_size / PAGE_SIZE
         header.DumpType = 1
 
         # Zero out the remaining non-essential fields from ContextRecordOffset
