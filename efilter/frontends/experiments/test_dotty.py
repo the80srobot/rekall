@@ -87,10 +87,17 @@ class ParserTest(unittest.TestCase):
         self.assertQueryMatches(query, expected)
 
     def testDescendQuery(self):
-        query = "with ProcessParent evaluate (ProcessName)"
+        query = "Process where (name == 'init' and pid == 1)"
         expected = expression.Let(
-            expression.Binding("ProcessParent"),
-            expression.Binding("ProcessName"))
+            expression.Binding("Process"),
+            expression.Intersection(
+                expression.Equivalence(
+                    expression.Binding("name"),
+                    expression.Literal("init")
+                ),
+                expression.Equivalence(
+                    expression.Binding("pid"),
+                    expression.Literal(1))))
         self.assertQueryMatches(query, expected)
 
     def testDescendShorthand(self):

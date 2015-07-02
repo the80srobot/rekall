@@ -80,12 +80,12 @@ class TypeInferenceTest(unittest.TestCase):
 
     def testDescendExpression(self):
         t = self.analyzeQuery(
-            "with ProcessParent evaluate (ProcessPid + 10)")
+            "ProcessParent where (ProcessPid + 10)")
 
         self.assertIsa(t, number.INumber)
 
         # Should be the same using shorthand syntax.
         t = self.analyzeQuery(
-            "with ProcessParent.ProcessParent evaluate (ProcessPid - 1)")
+            "ProcessParent.ProcessParent where (ProcessPid - 1)")
 
         self.assertIsa(t, number.INumber)

@@ -84,12 +84,6 @@ def TransformLetEach(let, **kwargs):
     return expression.LetEach(context, expr, **kwargs)
 
 
-def ValidateLetDescend(let, **_):
-    if not isinstance(let, expression.Let):
-        raise ValueError("'with' must be followed by 'evaluate'.")
-    return let
-
-
 # Operators - infix and prefix.
 
 Operator = collections.namedtuple("Operator",
@@ -139,12 +133,12 @@ INFIX = collections.OrderedDict([
     ("matches", Operator(precedence=2, assoc="left",
                          handler=expression.Let,
                          docstring="Left-hand operand matched subquery.")),
-    ("evaluate", Operator(precedence=2, assoc="left",
-                          handler=expression.Let,
-                          docstring="Left-hand let alternative.")),
+    ("where", Operator(precedence=2, assoc="left",
+                       handler=expression.Let,
+                       docstring="VALUE where SUBEXPRESSION")),
     (".", Operator(precedence=6, assoc="left",
                    handler=expression.Let,
-                   docstring="Shorthand for with V evaluate E.")),
+                   docstring="Shorthand for V where E.")),
     ("and", Operator(precedence=1, assoc="left",
                      handler=expression.Intersection,
                      docstring="Logical AND.")),
@@ -169,9 +163,7 @@ PREFIX = {
                                "any left-hand value matches.")),
     "each": Operator(precedence=1, assoc=None, handler=TransformLetEach,
                      docstring=("Following 'matches' should only "
-                                "succeed if all left-hand values match.")),
-    "with": Operator(precedence=1, assoc=None, handler=ValidateLetDescend,
-                     docstring=("Following 'evaluate' will give subquery."))
+                                "succeed if all left-hand values match."))
 }
 
 
