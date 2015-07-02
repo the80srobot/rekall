@@ -28,21 +28,20 @@ from efilter.frontends.experiments import dotty
 
 def build_operator_lookup(*tables):
     lookup = {}
-    misses = set()
     for table in tables:
         for token, operator in table.iteritems():
             if not isinstance(operator.handler, expression.Expression):
-                misses.add(token)
+                continue
 
             lookup[operator.handler] = token
 
-    return lookup, misses
+    return lookup
 
 
 class DottyOutput(engine.VisitorEngine):
     """Produces equivalent Dotty output to the AST."""
 
-    LOOKUP = build_operator_lookup(dotty.INFIX, dotty.PREFIX)[0]
+    LOOKUP = build_operator_lookup(dotty.INFIX, dotty.PREFIX)
 
     def visit_Literal(self, expr):
         return repr(expr.value)
