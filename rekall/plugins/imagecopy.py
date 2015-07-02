@@ -23,6 +23,7 @@
 
 import os
 
+from rekall import utils
 from rekall import plugin
 from rekall import testlib
 
@@ -81,8 +82,7 @@ class ImageCopy(plugin.PhysicalASMixin, plugin.Command):
                                      "please remove it before continuing")
 
         blocksize = 1024 * 1024 * 5
-        with renderer.open(filename=self.output_image,
-                           mode="wb") as fd:
+        with renderer.open(filename=self.output_image, mode="wb") as fd:
             for _ in self.address_space.get_available_addresses():
                 range_offset, _, range_length = _
                 renderer.format("Range {0:#x} - {1:#x}\n",
@@ -90,7 +90,8 @@ class ImageCopy(plugin.PhysicalASMixin, plugin.Command):
 
                 range_end = range_offset + range_length
 
-                for offset in xrange(range_offset, range_end, blocksize):
+                for offset in utils.xrange(
+                        range_offset, range_end, blocksize):
                     to_read = min(blocksize, range_end - offset)
                     data = self.address_space.read(offset, to_read)
 

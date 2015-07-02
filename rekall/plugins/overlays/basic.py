@@ -449,8 +449,8 @@ class ListMixIn(object):
 
         return item
 
-    def find_all_lists(self, seen):
-        """Follows all the list entries starting from lst.
+    def find_all_lists(self):
+        """Follows all the list entries starting from self.
 
         We basically convert the list to a tree and recursively search it for
         new nodes. From each node we follow the Flink and then the Blink. When
@@ -462,11 +462,17 @@ class ListMixIn(object):
         Reference:
         http://en.wikipedia.org/wiki/Depth-first_search
         """
+        # Maintain the order of discovery.
+        result = []
+        seen = set()
+
         stack = [self]
         while stack:
             item = stack.pop()
-            if item not in seen:
-                seen.append(item)
+            if item.obj_offset not in seen:
+                offset = item.obj_offset
+                seen.add(offset)
+                result.append(offset)
 
                 Blink = item.m(self._backward)
                 if Blink.is_valid():
@@ -476,22 +482,25 @@ class ListMixIn(object):
                 if Flink.is_valid():
                     stack.append(Flink.dereference())
 
+        return result
+
     def list_of_type(self, type, member):
-        result = []
-        self.find_all_lists(result)
+        relative_offset = self.obj_profile.get_obj_offset(type, member)
 
         # We traverse all the _LIST_ENTRYs we can find, and cast them all back
         # to the required member.
-        for lst in result:
+        for lst in self.find_all_lists():
             # Skip ourselves in this (list_of_type is usually invoked on a list
             # head).
-            if lst.obj_offset == self.obj_offset:
+            if lst == self.obj_offset:
                 continue
 
-            task = lst.dereference_as(type, member)
-            if task.obj_offset != 0:
-                # Only yield valid objects (In case of dangling links).
-                yield task
+            # Only yield valid objects (In case of dangling links).
+            if lst != 0:
+                yield self.obj_profile.Object(
+                    type_name=type, offset=lst - relative_offset,
+                    vm=self.obj_vm, parent=self.obj_parent,
+                    name=type, context=self.obj_context)
 
     def list_of_type_fast(self, type, member, include_current=True):
         for lst in self.walk_list(
@@ -593,7 +602,7 @@ class UnixTimeStamp(obj.NativeType):
             # Return a data time object in UTC.
             dt = datetime.datetime.utcfromtimestamp(
                 self.v()).replace(tzinfo=pytz.UTC)
-        except (ValueError, TypeError), e:
+        except (ValueError, TypeError) as e:
             return obj.NoneObject("Datetime conversion failure: " + str(e))
 
         return dt
@@ -992,6 +1001,53 @@ class BasicClasses(obj.Profile):
         })
         profile.add_constants(default_text_encoding="utf-16-le")
         profile.add_overlay(common_overlay)
+
+
+class RelativeOffsetMixin(object):
+    """A mixin which shifts all constant addresses by a constant."""
+
+    # This should be adjusted to the correct image base.
+    def GetImageBase(self):
+        return 0
+
+    def get_constant(self, name, is_address=False):
+        """Gets the constant from the profile.
+
+        The windows profile specify addresses relative to the kernel image base.
+        """
+        base_constant = super(RelativeOffsetMixin, self).get_constant(name)
+        if is_address and isinstance(base_constant, (int, long)):
+            return base_constant + self.GetImageBase()
+
+        return base_constant
+
+    def add_constants(self, relative_to_image_base=True, **kwargs):
+        """Add new constants to this profile.
+
+        Args:
+
+          - relative_to_image_base: If True, the constants are specified
+            relative to the image base. Otherwise constants are absolute
+            addresses.
+        """
+        for k, v in kwargs.items():
+            if not relative_to_image_base:
+                kwargs[k] = (v) - self.GetImageBase()
+
+        super(RelativeOffsetMixin, self).add_constants(**kwargs)
+
+    def get_nearest_constant_by_address(self, address, below=True):
+        if address < self.GetImageBase():
+            return 0, ""
+
+        try:
+            offset, name = super(
+                RelativeOffsetMixin, self).get_nearest_constant_by_address(
+                    address - self.GetImageBase(), below=below)
+
+            return offset + self.GetImageBase(), name
+        except ValueError:
+            return self.GetImageBase(), "image_base"
 
 
 def container_of(ptr, type, member):

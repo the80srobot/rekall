@@ -114,7 +114,7 @@ def LoadPlugins(paths=None):
             try:
                 logging.info("Loading user plugin %s", path)
                 __import__(module_name)
-            except Exception, e:
+            except Exception as e:
                 logging.error("Error loading user plugin %s: %s", path, e)
             finally:
                 sys.path.pop(0)
@@ -212,11 +212,9 @@ def ParseGlobalArgs(parser, argv, user_session):
             raise ValueError("Cannot set both --verbose and --quiet!")
 
         if verbose_flag:
-            state.Set("logging", "debug")
+            state.Set("logging_level", "DEBUG")
         elif quiet_flag:
-            state.Set("logging", "critical")
-        else:
-            state.Set("logging", "warn")
+            state.Set("logging_level", "CRITICAL")
 
     # Now load the third party user plugins. These may introduce additional
     # plugins with args.
@@ -226,21 +224,6 @@ def ParseGlobalArgs(parser, argv, user_session):
         # External files might have introduced new plugins - rebuild the plugin
         # DB.
         user_session.plugins.plugin_db.Rebuild()
-
-    # Possibly restore the session from a file.
-    session_filename = getattr(known_args, "session_filename", None)
-    if session_filename:
-        try:
-            user_session.LoadFromFile(session_filename)
-
-            # Set the command line args once again, in case they override
-            # something in the stored session.
-            with user_session.state as state:
-                for arg, value in known_args.__dict__.items():
-                    state.Set(arg, value)
-
-        except IOError:
-            pass
 
 
 def FindPlugin(argv=None, user_session=None):

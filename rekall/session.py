@@ -26,14 +26,15 @@ way for people to save their own results.
 
 __author__ = "Michael Cohen <scudette@gmail.com>"
 
-import json
 import logging
 import os
 import pdb
 import sys
 import time
 import traceback
+import weakref
 
+from rekall import cache
 from rekall import config
 from rekall import io_manager
 from rekall import kb
@@ -44,7 +45,6 @@ from rekall import utils
 
 from rekall.entities import manager as entity_manager
 from rekall.ui import renderer
-from rekall.ui import json_renderer
 
 
 config.DeclareOption(
@@ -121,41 +121,7 @@ class PluginContainer(object):
             if cls.name]
 
 
-class Cache(utils.AttributeDict):
-    def Get(self, item, default=None):
-        if default is None:
-            default = obj.NoneObject("%s not found in cache.", item)
-
-        return super(Cache, self).Get(item) or default
-
-    def __getattr__(self, attr):
-        # Do not allow private attributes to be set.
-        if attr.startswith("_"):
-            raise AttributeError(attr)
-
-        res = self.get(attr)
-        if res is None:
-            return obj.NoneObject("%s not set in cache", attr)
-
-        return res
-
-    def __str__(self):
-        """Print the contents somewhat concisely."""
-        result = []
-        for k, v in self.iteritems():
-            if isinstance(v, obj.BaseObject):
-                v = repr(v)
-
-            value = "\n  ".join(str(v).splitlines())
-            if len(value) > 1000:
-                value = "%s ..." % value[:1000]
-
-            result.append("  %s = %s" % (k, value))
-
-        return "{\n" + "\n".join(sorted(result)) + "\n}"
-
-
-class Configuration(Cache):
+class Configuration(utils.AttributeDict):
     """The session's configuration is managed through this object.
 
     The session can be configured using the SetParameter() method. However,
@@ -218,6 +184,15 @@ class Configuration(Cache):
     def __repr__(self):
         return "<Configuration Object>"
 
+    def _set_cache(self, cache_type, _):
+        # For volatile sessions we use a timed cache (which expires after a
+        # short time).
+        if self.session.volatile:
+            cache_type = "timed"
+
+        self.session.cache = cache.Factory(self.session, cache_type)
+        return cache_type
+
     def _set_filename(self, filename, parameters):
         """Callback for when a filename is set in the session.
 
@@ -238,7 +213,8 @@ class Configuration(Cache):
         # If a profile is not configured at this time, we need to auto-detect
         # it.
         if 'profile' not in parameters:
-            # Clear the existing profile and trigger profile autodetection.
+            # Clear the existing profile which will trigger profile
+            # autodetection on the new image.
             del self['profile']
             self['filename'] = filename
 
@@ -263,23 +239,29 @@ class Configuration(Cache):
         return profile_path
 
     def _set_profile(self, profile, _):
+        """This is triggered when someone explicitly sets the profile.
+
+        We force load the profile and avoid autodetection.
+        """
         profile_obj = self.session.LoadProfile(profile)
         if profile_obj:
-            self.cache.Set("profile_obj", profile_obj)
+            self.session.SetCache("profile_obj", profile_obj,
+                                  volatile=False)
 
         return profile
 
-    def _set_logging(self, level, _):
+    def _set_logging_level(self, level, _):
         if isinstance(level, basestring):
             level = getattr(logging, level.upper(), logging.INFO)
 
         if level == None:
             return
 
-        self.logging.info("Logging level set to %s", level)
-        self.logging.setLevel(int(level))
-        # Also set the root logging level, to reflect it in the console.
-        logging.getLogger().setLevel(int(level))
+        self.session.logging.debug("Logging level set to %s", level)
+        self.session.logging.setLevel(int(level))
+        if isinstance(self.session, InteractiveSession):
+            # Also set the root logging level, to reflect it in the console.
+            logging.getLogger().setLevel(int(level))
 
     def _set_ept(self, ept, _):
         self.session.Reset()
@@ -353,6 +335,21 @@ class Configuration(Cache):
             self.update(**self._pending_parameters)
             self._pending_parameters = {}
 
+    def __str__(self):
+        """Print the contents somewhat concisely."""
+        result = []
+        for k, v in self.iteritems():
+            if isinstance(v, obj.BaseObject):
+                v = repr(v)
+
+            value = "\n  ".join(str(v).splitlines())
+            if len(value) > 1000:
+                value = "%s ..." % value[:1000]
+
+            result.append("  %s = %s" % (k, value))
+
+        return "{\n" + "\n".join(sorted(result)) + "\n}"
+
 
 class ProgressDispatcher(object):
     """An object to manage progress calls.
@@ -395,13 +392,13 @@ class HoardingLogHandler(logging.Handler):
     def emit(self, record):
         """Deliver a message if a renderer is defined or store it, otherwise."""
         if not self.renderer:
-          self.logrecord_buffer.append(record)
+            self.logrecord_buffer.append(record)
         else:
-          self.renderer.Log(record)
+            self.renderer.Log(record)
 
-    def SetRenderer(self, renderer):
+    def SetRenderer(self, renderer_obj):
         """Sets the renderer so messages can be delivered."""
-        self.renderer = renderer
+        self.renderer = renderer_obj
         self.Flush()
 
     def Flush(self):
@@ -409,6 +406,7 @@ class HoardingLogHandler(logging.Handler):
         if self.renderer:
             for log_record in self.logrecord_buffer:
                 self.renderer.Log(log_record)
+
             self.logrecord_buffer = []
 
 
@@ -422,6 +420,10 @@ class Session(object):
 
     # The currently active address resolver.
     _address_resolver = None
+
+    # Each session has a unique session id (within this process). The ID is only
+    # unique among the sessions currently active.
+    session_id = 0
 
     def __init__(self, **kwargs):
         self.progress = ProgressDispatcher()
@@ -446,20 +448,46 @@ class Session(object):
         # Store user configurable attributes here. These will be read/written to
         # the configuration file.
         self.state = Configuration(session=self)
+        self.cache = cache.Factory(self, "memory")
         with self.state:
-            self.state.Set("cache", Cache())
-
             for k, v in kwargs.items():
                 self.state.Set(k, v)
 
-        # Set up a logging object. All rekall logging must be done through the
-        # session's logger.
-        logger_name = "rekall-%x" % id(self)
-        self.logging = kwargs.pop("logger", logging.getLogger(logger_name))
-        # A special log handler that hoards all messages until there's a
-        # renderer that can transport them.
-        self._log_handler = HoardingLogHandler()
-        self.logging.addHandler(self._log_handler)
+        # We use this logger if provided.
+        self.logger = kwargs.pop("logger", None)
+        self._logger = None
+
+        # Make this session id unique.
+        Session.session_id += 1
+
+        # At the start we haven't run any plugin.
+        self.last = None
+
+    @property
+    def logging(self):
+        if self.logger is not None:
+            return self.logger
+
+        logger_name = u"rekall.%s" % self.session_id
+        if self._logger is None or self._logger.name != logger_name:
+            # Set up a logging object. All rekall logging must be done
+            # through the session's logger.
+            self._logger = logging.getLogger(logger_name)
+
+            # A special log handler that hoards all messages until there's a
+            # renderer that can transport them.
+            self._log_handler = HoardingLogHandler()
+
+            # Since the logger is a global it must not hold a permanent
+            # reference to the HoardingLogHandler, otherwise we may never be
+            # collected.
+            def Remove(_, l=self._log_handler):
+                l.handlers = []
+
+            self._logger.addHandler(weakref.proxy(
+                self._log_handler, Remove))
+
+        return self._logger
 
     @property
     def volatile(self):
@@ -476,8 +504,8 @@ class Session(object):
             return self._repository_managers
 
         # The profile path is specified in search order.
-        repository_path = (self.state.Get("repository_path") or
-                           self.state.Get("profile_path") or [])
+        repository_path = (self.GetParameter("repository_path") or
+                           self.GetParameter("profile_path") or [])
 
         for path in repository_path:
             self._repository_managers.append(
@@ -498,7 +526,7 @@ class Session(object):
         self.profile_cache = {}
         self.physical_address_space = None
         self.kernel_address_space = None
-        self.state.cache.clear()
+        self.cache.Clear()
 
     @property
     def default_address_space(self):
@@ -534,9 +562,9 @@ class Session(object):
         If False, a call to GetParameter() might trigger autodetection.
         """
         return (self.state.get(item) is not None or
-                self.state.cache.get(item) is not None)
+                self.cache.Get(item) is not None)
 
-    def GetParameter(self, item, default=obj.NoneObject()):
+    def GetParameter(self, item, default=obj.NoneObject(), cached=True):
         """Retrieves a stored parameter.
 
         Parameters are managed by the Rekall session in two layers. The state
@@ -557,11 +585,11 @@ class Session(object):
         # None in the state dict means that the cache is empty. This is
         # different from a NoneObject() returned (which represents a cacheable
         # failure).
-        if result is None:
-            result = self.state.cache.get(item)
+        if result is None and cached:
+            result = self.cache.Get(item)
 
         # The result is not in the cache. Is there a hook that can help?
-        if result is None:
+        if result is None and cached:
             result = self._RunParameterHook(item)
 
         # Note that the hook may return a NoneObject() which should be cached.
@@ -570,9 +598,9 @@ class Session(object):
 
         return result
 
-    def SetCache(self, item, value):
+    def SetCache(self, item, value, volatile=True):
         """Store something in the cache."""
-        self.state.cache.Set(item, value)
+        self.cache.Set(item, value, volatile=volatile)
 
     def SetParameter(self, item, value):
         """Sets a session parameter.
@@ -593,7 +621,7 @@ class Session(object):
                 result = hook.calculate()
 
                 # Cache the output from the hook directly.
-                self.SetCache(name, result)
+                self.SetCache(name, result, volatile=hook.volatile)
 
                 return result
 
@@ -607,7 +635,7 @@ class Session(object):
             result[k.replace("-", "_")] = v
         return result
 
-    def RunPlugin(self, plugin_obj, *pos_args, **kwargs):
+    def RunPlugin(self, plugin_obj, *args, **kwargs):
         """Launch a plugin and its render() method automatically.
 
         We use the pager specified in session.GetParameter("pager").
@@ -617,25 +645,51 @@ class Session(object):
           *pos_args: Args passed to the plugin if it is not an instance.
           **kwargs: kwargs passed to the plugin if it is not an instance.
         """
+
+        # On multiple calls to RunPlugin, we need to make sure the
+        # HoardingLogHandler doesn't send messages to the wrong renderer.
+        # We reset the renderer and make it hoard messages until we have the
+        # new one.
+        self.logging.debug(
+            "Running plugin (%s) with args (%s) kwargs (%s)",
+            plugin_obj, args, kwargs)
         kwargs = self._CorrectKWArgs(kwargs)
-        output = kwargs.pop("output", None)
+        output = kwargs.pop("output", self.GetParameter("output"))
         ui_renderer = kwargs.pop("format", None)
+        result = None
 
-        # Do we need to redirect output?
-        if output is not None:
-            with self:
-                # Do not lose the global output redirection.
-                old_output = self.GetParameter("output") or None
-                self.SetParameter("output", output)
-                try:
-                    return self._RunPlugin(plugin_obj, renderer=ui_renderer,
-                                           *pos_args, **kwargs)
-                finally:
-                    self.SetParameter("output", old_output)
+        if ui_renderer is None:
+            ui_renderer = self.GetRenderer(output=output)
 
-        else:
-            return self._RunPlugin(plugin_obj, renderer=ui_renderer,
-                                   *pos_args, **kwargs)
+        # Set the renderer so we can transport log messages.
+        self._log_handler.SetRenderer(ui_renderer)
+
+        try:
+            plugin_name = self._GetPluginName(plugin_obj)
+        except Exception as e:
+            raise ValueError(
+                "Invalid plugin_obj parameter (%s)." % repr(plugin))
+
+        with ui_renderer.start(plugin_name=plugin_name, kwargs=kwargs):
+            try:
+                original_plugin_obj = plugin_obj
+                plugin_obj = self._GetPluginObj(plugin_obj, *args, **kwargs)
+                if not plugin_obj:
+                    raise ValueError(
+                        "Invalid Plugin: %s", original_plugin_obj)
+                result = plugin_obj.render(ui_renderer) or plugin_obj
+                self.last = plugin_obj
+            except (Exception, KeyboardInterrupt) as e:
+                self._HandleRunPluginException(ui_renderer, e)
+
+        # At this point, the ui_renderer will have flushed all data.
+        # Further logging will be lost.
+        return result
+
+    def _HandleRunPluginException(self, ui_renderer, e):
+        """Handle exceptions thrown while trying to run a plugin."""
+        _ = ui_renderer
+        raise e
 
     def _GetPluginName(self, plugin_obj):
         """Extract the name from the plugin object."""
@@ -648,7 +702,7 @@ class Session(object):
         elif isinstance(plugin_obj, plugin.Command):
             return plugin_obj.name
 
-    def _GetPluginObj(self, plugin_obj, *pos_args, **kwargs):
+    def _GetPluginObj(self, plugin_obj, *args, **kwargs):
         if isinstance(plugin_obj, basestring):
             plugin_name = plugin_obj
 
@@ -674,55 +728,7 @@ class Session(object):
 
         # Instantiate the plugin object.
         kwargs["session"] = self
-        return plugin_cls(*pos_args, **kwargs)
-
-    def _RunPlugin(self, plugin_obj, *pos_args, **kwargs):
-        ui_renderer = kwargs.pop("renderer", None)
-        if ui_renderer is None:
-            ui_renderer = self.GetRenderer()
-
-
-        # Set the renderer so we can transport log messages.
-        self._log_handler.SetRenderer(ui_renderer)
-
-        # Start the renderer before instantiating the plugin to allow
-        # rendering of reported progress in the constructor.
-        try:
-            with ui_renderer.start(plugin_name=self._GetPluginName(plugin_obj),
-                                   kwargs=kwargs):
-                plugin_obj = self._GetPluginObj(plugin_obj, *pos_args, **kwargs)
-                return plugin_obj.render(ui_renderer) or plugin_obj
-
-        except plugin.InvalidArgs as e:
-            self.logging.fatal("Invalid Args: %s" % e)
-
-        except plugin.PluginError as e:
-            self.logging.fatal(str(e))
-            if isinstance(plugin_obj, plugin.Command):
-                plugin_obj.error_status = str(e)
-
-        except (KeyboardInterrupt, plugin.Abort):
-            self.logging.fatal("Aborted\r\n")
-
-        except Exception, e:
-            error_status = traceback.format_exc()
-            if isinstance(plugin_obj, plugin.Command):
-                plugin_obj.error_status = error_status
-
-            # Report the error to the renderer.
-            self.logging.fatal(error_status)
-
-            # If anything goes wrong, we break into a debugger here.
-            if self.GetParameter("debug"):
-                pdb.post_mortem(sys.exc_info()[2])
-
-            raise
-
-        finally:
-            self._log_handler.SetRenderer(None)
-            ui_renderer.flush()
-
-        return plugin_obj
+        return plugin_cls(*args, **kwargs)
 
     def LoadProfile(self, name, use_cache=True):
         """Try to load a profile directly by its name.
@@ -783,7 +789,7 @@ class Session(object):
                     if not manager.CheckInventory(name):
                         self.logging.debug(
                             "Skipped profile %s from %s (Not in inventory)",
-                                name, path)
+                            name, path)
                         continue
 
                     result = obj.Profile.LoadProfileFromData(
@@ -796,7 +802,7 @@ class Session(object):
                 except (IOError, KeyError) as e:
                     result = obj.NoneObject(e)
                     self.logging.debug("Could not find profile %s in %s: %s",
-                                  name, path, e)
+                                       name, path, e)
 
                     continue
 
@@ -816,7 +822,7 @@ class Session(object):
         """Called by the library to report back on the progress."""
         self.progress.Broadcast(message, *args, **kwargs)
 
-    def GetRenderer(self):
+    def GetRenderer(self, output=None):
         """Get a renderer for this session.
 
         We instantiate the renderer specified in self.GetParameter("format").
@@ -825,7 +831,7 @@ class Session(object):
         if isinstance(ui_renderer, basestring):
             ui_renderer_cls = renderer.BaseRenderer.ImplementationByName(
                 ui_renderer)
-            ui_renderer = ui_renderer_cls(session=self)
+            ui_renderer = ui_renderer_cls(session=self, output=output)
 
         return ui_renderer
 
@@ -839,16 +845,24 @@ class Session(object):
         # Clear the profile object. Next access to it will trigger profile
         # auto-detection.
         if value == None:
-            self.state.cache.Set('profile_obj', value)
+            self.SetCache('profile_obj', value, volatile=False)
 
         elif isinstance(value, basestring):
             with self.state:
                 self.state.Set('profile', value)
 
         elif isinstance(value, obj.Profile):
-            self.state.cache.Set('profile_obj', value)
+            self.SetCache('profile_obj', value, volatile=False)
+            self.SetCache("profile", value.name, volatile=False)
         else:
             raise AttributeError("Type %s not allowed for profile" % value)
+
+    def Flush(self):
+        """Destroy this session.
+
+        This should be called when the session is destroyed.
+        """
+        self.cache.Flush()
 
     def clone(self, **kwargs):
         new_state = self.state.copy()
@@ -873,71 +887,6 @@ class Session(object):
             for k, v in kwargs.iteritems():
                 new_session.SetParameter(k, v)
         return new_session
-
-
-class JsonSerializableSession(Session):
-    """A session which can serialize its state into a Json file."""
-
-    # We only serialize the following session variables since they make this
-    # session unique. When we unserialize we merge the other state variables
-    # from this current session.
-    SERIALIZABLE_STATE_PARAMETERS = [
-        ("ept", u"IntParser"),
-        ("profile", u"FileName"),
-        ("filename", u"FileName"),
-        ("pagefile", u"FileName"),
-        ("session_name", u"String"),
-        ("timezone", u"TimeZone"),
-    ]
-
-    def __eq__(self, other):
-        if not isinstance(other, Session):
-            return False
-
-        for field, _ in self.SERIALIZABLE_STATE_PARAMETERS:
-            if self.HasParameter(field):
-                # We have this field but the other does not.
-                if not other.HasParameter(field):
-                    return False
-
-                if self.GetParameter(field) != other.GetParameter(field):
-                    return False
-
-        return True
-
-    def SaveToFile(self, filename):
-        with open(filename, "wb") as fd:
-            self.logging.info("Saving session to %s", filename)
-            json.dump(self.Serialize(), fd)
-
-    def LoadFromFile(self, filename):
-        try:
-            lexicon, data = json.load(open(filename, "rb"))
-            self.logging.info("Loaded session from %s", filename)
-
-            self.Unserialize(lexicon, data)
-
-        # decoding the session might fail un-expectantly - just discard the
-        # session in that case.
-        except Exception:
-            # If anything goes wrong, we break into a debugger here.
-            self.logging.error(traceback.format_exc())
-
-            if self.GetParameter("debug"):
-                pdb.post_mortem(sys.exc_info()[2])
-
-    def Unserialize(self, lexicon, data):
-        json_renderer_obj = json_renderer.JsonRenderer(session=self)
-        decoder = json_renderer.JsonDecoder(self, json_renderer_obj)
-        decoder.SetLexicon(lexicon)
-        self.state = Configuration(session=self, **decoder.Decode(data))
-
-    def Serialize(self):
-        encoder = json_renderer.JsonEncoder(
-            session=self, renderer="JsonRenderer")
-
-        data = encoder.Encode(self.state)
-        return encoder.GetLexicon(), data
 
 
 class DynamicNameSpace(dict):
@@ -1007,7 +956,7 @@ class DynamicNameSpace(dict):
         return runner
 
 
-class InteractiveSession(JsonSerializableSession):
+class InteractiveSession(Session):
     """The session allows for storing of arbitrary values and configuration.
 
     This session contains a lot of convenience features which are useful for
@@ -1079,7 +1028,7 @@ class InteractiveSession(JsonSerializableSession):
 
     @property
     def session_id(self):
-        return self.GetParameter("session_id")
+        return self.GetParameter("session_id", default=Session.session_id)
 
     def find_session(self, session_id):
         for session in self.session_list:
@@ -1096,9 +1045,29 @@ class InteractiveSession(JsonSerializableSession):
 
         return new_sid
 
-    def RunPlugin(self, *args, **kwargs):
-        self.last = super(InteractiveSession, self).RunPlugin(*args, **kwargs)
-        return self.last
+    def _HandleRunPluginException(self, ui_renderer, e):
+        """Handle all exceptions thrown by logging to the console."""
+
+        if isinstance(e, plugin.InvalidArgs):
+            self.logging.fatal("Invalid Args: %s" % e)
+
+        elif isinstance(e, plugin.PluginError):
+            self.logging.fatal(str(e))
+
+        elif isinstance(e, KeyboardInterrupt) or isinstance(e, plugin.Abort):
+            logging.error("Aborted\r\n")
+
+        else:
+            error_status = traceback.format_exc()
+
+            # Report the error to the renderer.
+            self.logging.fatal(error_status)
+
+            # If anything goes wrong, we break into a debugger here.
+            if self.GetParameter("debug"):
+                pdb.post_mortem(sys.exc_info()[2])
+
+            raise
 
     def v(self):
         """Re-execute the previous command."""
@@ -1110,11 +1079,17 @@ class InteractiveSession(JsonSerializableSession):
             self.printer(x)
 
     def __str__(self):
-        result = """Rekall Memory Forensics session Started on %s.
+        return self.__unicode__()
+
+    def __unicode__(self):
+        result = u"""Rekall Memory Forensics session Started on %s.
 
 Config:
 %s
-""" % (time.ctime(self._start_time), self.state)
+
+Cache (%r):
+%s
+""" % (time.ctime(self._start_time), self.state, self.cache, self.cache)
         return result
 
     def __dir__(self):

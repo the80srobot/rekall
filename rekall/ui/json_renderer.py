@@ -44,12 +44,16 @@ class EncodingError(KeyError):
 class RobustEncoder(json.JSONEncoder):
     def __init__(self, logging=None, **_):
         super(RobustEncoder, self).__init__(separators=(',', ':'))
-        self.logging = logging.getChild("json.encoder.robust")
+        if logging is None:
+            self.logging = None
+        else:
+            self.logging = logging.getChild("json.encoder.robust")
 
     def default(self, o):
-        self.logging.error(
-            "Unable to encode %r (%s) as json, replacing with None", o,
-            type(o))
+        if self.logging:
+            self.logging.error(
+                "Unable to encode %r (%s) as json, replacing with None", o,
+                type(o))
         return None
 
 
@@ -74,6 +78,15 @@ class JsonObjectRenderer(renderer_module.ObjectRenderer):
                 return cls.FromMRO(mro, renderer)
 
         return cls.ForTarget(item, renderer)
+
+    @staticmethod
+    def GetImplementationFromMRO(base_class, value):
+        """Get the class referred to by the head of the value's MRO."""
+        class_name = value["mro"].split(":")[0]
+
+        for cls in base_class.__subclasses__():
+            if class_name == cls.__name__:
+                return cls
 
     def _encode_value(self, item, **options):
         object_renderer_cls = self.ForTarget(item, self.renderer)
@@ -130,8 +143,11 @@ class JsonObjectRenderer(renderer_module.ObjectRenderer):
             return result
 
         # Mark encoded lists so we know they are encoded.
-        elif isinstance(item, (tuple, list)):
+        elif isinstance(item, list):
             return list(self._encode_value(x, **options) for x in item)
+
+        elif isinstance(item, tuple):
+            return tuple(self._encode_value(x, **options) for x in item)
 
         # Encode json safe items literally.
         if isinstance(item, (unicode, int, long, float)):
@@ -143,7 +159,7 @@ class JsonObjectRenderer(renderer_module.ObjectRenderer):
         # objects but we want to ensure we can serialize the session (albeit
         # with the loss of some of the attributes).
         self.session.logging.error(
-          "Unable to encode objects of type %s", type(item))
+            "Unable to encode objects of type %s", type(item))
         if "strict" in options:
             raise EncodingError(
                 "Unable to encode objects of type %s" % type(item))
@@ -174,8 +190,11 @@ class JsonObjectRenderer(renderer_module.ObjectRenderer):
 
             return result
 
-        if value.__class__ in (list, tuple):
+        if value.__class__ is list:
             return list(self._decode_value(x, options) for x in value)
+
+        if value.__class__ is tuple:
+            return tuple(self._decode_value(x, options) for x in value)
 
         # Decode json safe items literally.
         if isinstance(value, (unicode, int, long, float)):
@@ -539,7 +558,7 @@ class JsonRenderer(renderer_module.BaseRenderer):
         self.send_message_callback = send_message_callback
 
         # Allow the user to dump all output to a file.
-        self.output = output or self.session.GetParameter("output")
+        self.output = output
 
         # This keeps a list of object renderers which we will use for each
         # column.
@@ -662,13 +681,10 @@ class JsonRenderer(renderer_module.BaseRenderer):
             return True
 
     def Log(self, record):
-        loglevel_to_code = {
-          "CRITICAL": "lC",
-          "ERROR": "lE",
-          "WARNING": "lW",
-          "INFO": "lI",
-          "DEBUG": "lD"
+        log_message = {
+            "msg": record.getMessage(),
+            "level": record.levelname,
+            "name": record.name,
+            "time": record.created,
         }
-
-        code = loglevel_to_code.get(record.levelname, "lU")
-        self.SendMessage([code, record.getMessage()])
+        self.SendMessage(["L", log_message])

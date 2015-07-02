@@ -169,6 +169,8 @@ class KCoreAddressSpace(Elf64CoreDump):
     __name = "elf64"
     __image = True
 
+    volatile = True
+
     def __init__(self, **kwargs):
         super(KCoreAddressSpace, self).__init__(**kwargs)
 
@@ -200,7 +202,7 @@ class KCoreAddressSpace(Elf64CoreDump):
                         "This kcore file is too small (%d bytes) and likely "
                         "invalid for memory analysis. You may want to use pmem "
                         "instead." % statinfo.st_size)
-            except IOError, AttributeError:
+            except(IOError, AttributeError):
                 pass
 
         for x in runs:

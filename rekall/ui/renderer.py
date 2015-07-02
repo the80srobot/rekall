@@ -112,6 +112,18 @@ config.DeclareOption(
     choices=["concise", "full"],
     help="How much information to show. Default is 'concise'.")
 
+config.DeclareOption(
+    "--logging_level", type="Choices", default="WARNING",
+    choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+    help="The default logging level.")
+
+
+# A cache to map a tuple (mro, renderer) to the corresponding object renderer.
+MRO_RENDERER_CACHE = utils.FastStore(100, lock=True)
+
+# A cache to map a class to its reduced MRO list. Do not hold class references
+# in this cache as these capture closure variables via the Curry() classes on
+# the property methods.
 MRO_CACHE = utils.FastStore(100, lock=True)
 
 
@@ -149,7 +161,7 @@ class ObjectRenderer(object):
             item = item.__class__
 
         try:
-            return MRO_CACHE.Get(item)
+            return MRO_CACHE.Get(item.__name__)
         except KeyError:
             # Remove duplicated class names from the MRO (The current
             # implementation uses the flat class name to select the
@@ -157,7 +169,7 @@ class ObjectRenderer(object):
             result = tuple(collections.OrderedDict.fromkeys(
                 [unicode(x.__name__) for x in item.__mro__]))
 
-            MRO_CACHE.Put(item, result)
+            MRO_CACHE.Put(item.__name__, result)
             return result
 
     @classmethod
@@ -175,7 +187,7 @@ class ObjectRenderer(object):
     def FromMRO(cls, mro, renderer):
         """Get the best object renderer class from the MRO."""
         try:
-            return MRO_CACHE[(mro, renderer)]
+            return MRO_RENDERER_CACHE[(mro, renderer)]
         except KeyError:
             cls._BuildRendererCache()
 
@@ -191,7 +203,7 @@ class ObjectRenderer(object):
                     (class_name, renderer))
 
                 if object_renderer_cls:
-                    MRO_CACHE.Put((mro, renderer), object_renderer_cls)
+                    MRO_RENDERER_CACHE.Put((mro, renderer), object_renderer_cls)
                     return object_renderer_cls
 
     @classmethod
@@ -358,6 +370,9 @@ class BaseRenderer(object):
         return self
 
     def __exit__(self, exc_type, exc_value, trace):
+        log_handler = getattr(self.session, "_log_handler", None)
+        if log_handler != None:
+            log_handler.SetRenderer(None)
         self.end()
 
     def start(self, plugin_name=None, kwargs=None):
@@ -453,10 +468,10 @@ class BaseRenderer(object):
         # TODO(jordi): Remove in 3 months when any usage should have been
         # noticed and fixed.
         logging.error(
-          "**DEPRECATED** report_error is deprecated. Please use the session "
-          "logging feature instead. Original message was: %s", message)
+            "**DEPRECATED** report_error is deprecated. Please use the session "
+            "logging feature instead. Original message was: %s", message)
         self.session.logging.error(
-          "**DEPRECATED** (via report_error): %s", message)
+            "**DEPRECATED** (via report_error): %s", message)
 
     def RenderProgress(self, *_, **kwargs):
         """Will be called to render a progress message to the user."""
@@ -506,7 +521,7 @@ class BaseRenderer(object):
         # This should never happen if the renderer installs a handler for
         # object().
         raise RuntimeError("Unable to render object %r for renderer %s" %
-                           (repr(target), target_renderer) + 
+                           (repr(target), target_renderer) +
                            str(ObjectRenderer._RENDERER_CACHE))
 
     def Log(self, record):

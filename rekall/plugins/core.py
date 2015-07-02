@@ -182,7 +182,7 @@ class Info(plugin.Command):
             doc_string = cls_doc + init_doc
             doc_string += (
                 "\n\nLink:\n"
-                "http://www.rekall-forensic.com/epydoc/%s.%s-class.html"
+                "http://www.rekall-forensic.com/epydocs/%s.%s-class.html"
                 "\n\n" % (item.__module__, item.__name__))
 
             renderer.write(doc_string)
@@ -379,7 +379,7 @@ class LoadAddressSpace(plugin.Command):
 
             return self.session.physical_address_space
 
-        except addrspace.ASAssertionError, e:
+        except addrspace.ASAssertionError as e:
             self.session.logging.error("Could not create address space: %s" % e)
 
         return self.session.physical_address_space
@@ -475,12 +475,12 @@ class LoadAddressSpace(plugin.Command):
                     found = True
                     break
                 except (AssertionError,
-                        addrspace.ASAssertionError), e:
+                        addrspace.ASAssertionError) as e:
                     self.session.logging.debug("Failed instantiating %s: %s",
-                                  cls.__name__, e)
+                                               cls.__name__, e)
                     error.append_reason(cls.__name__, e)
                     continue
-                except Exception, e:
+                except Exception as e:
                     self.session.logging.error("Fatal Error: %s", e)
                     if self.session.GetParameter("debug"):
                         pdb.post_mortem()
@@ -1036,13 +1036,8 @@ class Grep(plugin.Command):
             for idx in self._GenerateHits(data):
                 for dump_offset, hexdata, translated_data in utils.Hexdump(
                         data[idx-20:idx+20], width=self.context):
-                    comment = ""
-                    nearest_offset, symbol = (
-                        resolver.get_nearest_constant_by_address(offset + idx))
-
-                    if symbol:
-                        comment = "%s+0x%X" % (
-                            symbol, offset + idx - nearest_offset)
+                    comment = resolver.format_address(offset + idx,
+                                                      max_distance=1e6)
 
                     renderer.table_row(
                         offset + idx - 20 + dump_offset,
