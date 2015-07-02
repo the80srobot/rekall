@@ -23,12 +23,42 @@ __author__ = "Adam Sindelar <adamsh@google.com>"
 from efilter import engine
 from efilter import expression
 
+from efilter.frontends.experiments import dotty
+
+
+def build_operator_lookup(*tables):
+    lookup = {}
+    misses = set()
+    for table in tables:
+        for token, operator in table.iteritems():
+            if not isinstance(operator.handler, expression.Expression):
+                misses.add(token)
+
+            lookup[operator.handler] = token
+
+    return lookup, misses
+
 
 class DottyOutput(engine.VisitorEngine):
     """Produces equivalent Dotty output to the AST."""
 
-    def visit_Expression(self, expr, **_):
-        pass
+    LOOKUP = build_operator_lookup(dotty.INFIX, dotty.PREFIX)[0]
 
+    def visit_Literal(self, expr):
+        return repr(expr.value)
+
+    def visit_Binding(self, expr):
+        return expr.value
+
+    def visit_Complement(self, expr):
+        return "not (%s)" % self.visit(expr)
+
+    def visit_BinaryExpression(self, expr):
+        return self.visit_VariadicExpression(expr)
+
+    def visit_VariadicExpression(self, expr):
+        token = self.LOOKUP[type(expr)]
+        separator = " %s " % token
+        return separator.join(self.visit(x) for x in expr.children)
 
 engine.Engine.register_engine(DottyOutput, "dotty_output")
