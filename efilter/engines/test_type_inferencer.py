@@ -64,11 +64,11 @@ class TypeInferenceTest(unittest.TestCase):
 
     def testRecursive(self):
         t = self.analyzeQuery(
-            "ProcessParent matches (ProcessName == 'init')")
+            "ProcessParent where (ProcessName == 'init')")
         self.assertIsa(t, boolean.IBoolean)
 
         t = self.analyzeQuery(
-            "any ProcessChildren matches (ProcessName == 'init')")
+            "any ProcessChildren where (ProcessName == 'init')")
         self.assertIsa(t, boolean.IBoolean)
 
     def testNumbers(self):
