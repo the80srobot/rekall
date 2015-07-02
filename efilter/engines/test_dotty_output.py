@@ -3,7 +3,7 @@ import unittest
 from efilter import query
 
 
-class RuleAnalyzerTest(unittest.TestCase):
+class DottyOutputTest(unittest.TestCase):
     def assertOutput(self, original, output):
         q = query.Query(original, syntax="dotty")
         actual_output = q.run_engine("dotty_output")
