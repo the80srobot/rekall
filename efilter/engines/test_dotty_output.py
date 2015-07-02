@@ -12,3 +12,12 @@ class RuleAnalyzerTest(unittest.TestCase):
     def testBasic(self):
         self.assertOutput(original="5 + 5 == 10",
                           output="5 + 5 == 10")
+
+    def testSimpleLet(self):
+        self.assertOutput(original="Process.name == 'foo'",
+                          output="Process.name == 'foo'")
+
+    def testWhere(self):
+        self.assertOutput(
+            original="Process.parent where (name == 'foo' and pid == 5)",
+            output="Process.parent where (name == 'foo' and pid == 5)")

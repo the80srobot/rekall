@@ -44,6 +44,24 @@ class DottyOutput(engine.VisitorEngine):
 
     TOKENS = build_operator_lookup(dotty.INFIX, dotty.PREFIX)
 
+    def visit_Let(self, expr):
+        lhs = expr.lhs
+        rhs = expr.rhs
+        left = self.visit(lhs)
+        right = self.visit(rhs)
+        token = "."
+
+        if not isinstance(expr.lhs, expression.ValueExpression):
+            left = "(%s)" % left
+            token = " where "
+
+        if not isinstance(expr.rhs, (expression.ValueExpression,
+                                     expression.Let)):
+            right = "(%s)" % right
+            token = " where "
+
+        return token.join((left, right))
+
     def visit_Literal(self, expr):
         return repr(expr.value)
 
