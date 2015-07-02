@@ -180,7 +180,7 @@ class ParserTest(unittest.TestCase):
         self.assertQueryMatches(query, expected)
 
     def testLetSingle(self):
-        query = "ProcessParent matches ProcessCommand == 'init'"
+        query = "ProcessParent where ProcessCommand == 'init'"
         expected = expression.Let(
             expression.Binding("ProcessParent"),
             expression.Equivalence(
@@ -190,7 +190,7 @@ class ParserTest(unittest.TestCase):
         self.assertQueryMatches(query, expected)
 
     def testLetSubexpr(self):
-        query = ("ProcessParent matches (ProcessCommand == 'init' and "
+        query = ("ProcessParent where (ProcessCommand == 'init' and "
                  "ProcessPid == 1)")
         expected = expression.Let(
             expression.Binding("ProcessParent"),
@@ -205,7 +205,7 @@ class ParserTest(unittest.TestCase):
         self.assertQueryMatches(query, expected)
 
     def testLetSingleAny(self):
-        query = "any ProcessParent matches ProcessCommand == 'init'"
+        query = "any ProcessParent where ProcessCommand == 'init'"
         expected = expression.LetAny(
             expression.Binding("ProcessParent"),
             expression.Equivalence(
@@ -215,7 +215,7 @@ class ParserTest(unittest.TestCase):
         self.assertQueryMatches(query, expected)
 
     def testLetSubexprEach(self):
-        query = "each ProcessChildren matches ProcessCommand == 'foo'"
+        query = "each ProcessChildren where ProcessCommand == 'foo'"
         expected = expression.LetEach(
             expression.Binding("ProcessChildren"),
             expression.Equivalence(
@@ -239,7 +239,7 @@ class ParserTest(unittest.TestCase):
 
     def testBigQuery(self):
         query = ("(ProcessPid == 1 and ProcessCommand in ('init', 'initd')) "
-                 "or any ProcessChildren matches (ProcessCommand not in "
+                 "or any ProcessChildren where (ProcessCommand not in "
                  "('launchd', 'foo'))")
         expected = expression.Union(
             expression.Intersection(
@@ -309,7 +309,7 @@ class ParserTest(unittest.TestCase):
 
     def testParenParsing(self):
         # This query should fail on the lose 'name' token:
-        query = ("BufferPurpose == 'zones' and any BufferContext matches"
+        query = ("BufferPurpose == 'zones' and any BufferContext where"
                  " (AllocationZone name == {zone_name})")
         params = dict(zone_name="foo")
         parser = dotty.Parser(query, params=params)

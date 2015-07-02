@@ -30,7 +30,8 @@ def build_operator_lookup(*tables):
     lookup = {}
     for table in tables:
         for token, operator in table.iteritems():
-            if not isinstance(operator.handler, expression.Expression):
+            if not (isinstance(operator.handler, type) and
+                    issubclass(operator.handler, expression.Expression)):
                 continue
 
             lookup[operator.handler] = token
@@ -41,7 +42,7 @@ def build_operator_lookup(*tables):
 class DottyOutput(engine.VisitorEngine):
     """Produces equivalent Dotty output to the AST."""
 
-    LOOKUP = build_operator_lookup(dotty.INFIX, dotty.PREFIX)
+    TOKENS = build_operator_lookup(dotty.INFIX, dotty.PREFIX)
 
     def visit_Literal(self, expr):
         return repr(expr.value)
@@ -56,7 +57,7 @@ class DottyOutput(engine.VisitorEngine):
         return self.visit_VariadicExpression(expr)
 
     def visit_VariadicExpression(self, expr):
-        token = self.LOOKUP[type(expr)]
+        token = self.TOKENS[type(expr)]
         separator = " %s " % token
         return separator.join(self.visit(x) for x in expr.children)
 
